@@ -1,0 +1,204 @@
+version: "1.0"
+target_database: "olist.duckdb"
+
+# Business context for the Text-to-SQL agent
+# Physical column types still come from DuckDB via agent/context.py 
+# this file adds descriptions, roles, relationships, measures, and golden queries.
+
+tables:
+  orders:
+    description: One row per customer purchase. Use order_status to filter lifecycle.
+    primary_key: order_id
+    fields:
+      - name: order_id
+        type: varchar
+        role: entity
+        description: Unique order identifier; join key for items and payments.
+      - name: customer_id
+        type: varchar
+        role: relationship
+        description: Links the order to the buyer in customers.
+        related_table: customers
+        related_field: customer_id
+      - name: order_status
+        type: varchar
+        role: dimension
+        description: Order lifecycle status. Use 'delivered' for completed orders in revenue metrics.
+      - name: order_purchase_timestamp
+        type: varchar
+        role: dimension
+        description: When the order was placed; cast to TIMESTAMP for date filters.
+
+  order_items:
+    description: Line items on each order. Net product revenue comes from price only.
+    primary_key: order_item_id
+    fields:
+      - name: order_item_id
+        type: varchar
+        role: entity
+        description: Unique line-item identifier.
+      - name: order_id
+        type: varchar
+        role: relationship
+        description: Parent order for this line item.
+        related_table: orders
+        related_field: order_id
+      - name: product_id
+        type: varchar
+        role: relationship
+        description: Product sold on this line.
+        related_table: products
+        related_field: product_id
+      - name: price
+        type: double
+        role: measure
+        description: Product price only. Use for net product revenue — not freight, not payments.
+      - name: freight_value
+        type: double
+        role: measure
+        description: Shipping charge on the line item. Do not add to net product revenue.
+
+  order_payments:
+    description: Payment rows per order. payment_value includes freight collected at checkout.
+    primary_key: payment_sequential
+    fields:
+      - name: order_id
+        type: varchar
+        role: relationship
+        description: Order this payment belongs to.
+        related_table: orders
+        related_field: order_id
+      - name: payment_sequential
+        type: bigint
+        role: entity
+        description: Sequence number when an order has multiple payment rows.
+      - name: payment_type
+        type: varchar
+        role: dimension
+        description: Method of payment (credit_card, boleto, voucher, etc.).
+      - name: payment_value
+        type: double
+        role: measure
+        description: Amount paid including freight. Use for gross payment value, not net product revenue.
+
+  customers:
+    description: Customer master data. Join to orders for buyer location and segmentation.
+    primary_key: customer_id
+    fields:
+      - name: customer_id
+        type: varchar
+        role: entity
+        description: Unique customer identifier.
+      - name: customer_state
+        type: varchar
+        role: dimension
+        description: Brazilian state of the buyer (not the seller). Join orders → customers.
+
+  products:
+    description: Product catalog attributes for category and assortment questions.
+    primary_key: product_id
+    fields:
+      - name: product_id
+        type: varchar
+        role: entity
+        description: Unique product identifier; links to order_items.
+      - name: product_category_name
+        type: varchar
+        role: dimension
+        description: Category slug; join product_category_name_translation for English labels.
+
+  product_category_name_translation:
+    description: Maps Portuguese category slugs to English display names.
+    primary_key: product_category_name
+    fields:
+      - name: product_category_name
+        type: varchar
+        role: relationship
+        description: Matches products.product_category_name.
+        related_table: products
+        related_field: product_category_name
+      - name: product_category_name_english
+        type: varchar
+        role: dimension
+        description: English category label for reporting.
+
+relationships:
+  - description: Line items belong to an order.
+    join: order_items.order_id = orders.order_id
+  - description: Payments belong to an order.
+    join: order_payments.order_id = orders.order_id
+  - description: Orders belong to a customer (buyer location).
+    join: orders.customer_id = customers.customer_id
+  - description: Line items reference a product.
+    join: order_items.product_id = products.product_id
+  - description: English category labels for products.
+    join: products.product_category_name = product_category_name_translation.product_category_name
+
+measures:
+  net_product_revenue:
+    name: Net Product Revenue
+    description: Pure product sales excluding shipping/freight and non-delivered orders.
+    formula: SUM(order_items.price)
+    source_table: order_items
+    required_joins:
+      - orders
+    mandatory_filters:
+      - orders.order_status = 'delivered'
+
+  gross_payment_value:
+    name: Gross Payment Value
+    description: Total payment received including freight fees on delivered orders.
+    formula: SUM(order_payments.payment_value)
+    source_table: order_payments
+    required_joins:
+      - orders
+    mandatory_filters:
+      - orders.order_status = 'delivered'
+
+join_rules:
+  - rule_id: prevent_cartesian_fanout
+    description: "CRITICAL: Never join order_payments directly to order_items in a single query. Aggregating prices and payments in one join causes a Cartesian explosion."
+    recommendation: Use separate CTEs or subqueries for item revenue and payment totals, then combine.
+
+  - rule_id: customer_state_origin
+    description: Use customers.customer_state for buyer geography, not sellers.seller_state.
+
+  - rule_id: revenue_vs_payments
+    description: net_product_revenue uses order_items.price; gross_payment_value uses order_payments.payment_value. They are different metrics.
+
+golden_queries:
+  - name: net_product_revenue_delivered
+    description: Total net product revenue on delivered orders (q01 ground truth).
+    sql: |
+      SELECT ROUND(SUM(oi.price), 2) AS net_product_revenue
+      FROM order_items oi
+      JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.order_status = 'delivered'
+
+  - name: net_and_gross_revenue_delivered
+    description: Both metrics on delivered orders without fan-out (q05 ground truth).
+    sql: |
+      WITH item_rev AS (
+        SELECT ROUND(SUM(oi.price), 2) AS net_product_revenue
+        FROM order_items oi
+        JOIN orders o ON o.order_id = oi.order_id
+        WHERE o.order_status = 'delivered'
+      ),
+      pay AS (
+        SELECT ROUND(SUM(p.payment_value), 2) AS gross_payment_value
+        FROM order_payments p
+        JOIN orders o ON o.order_id = p.order_id
+        WHERE o.order_status = 'delivered'
+      )
+      SELECT item_rev.net_product_revenue, pay.gross_payment_value
+      FROM item_rev CROSS JOIN pay
+
+  - name: delivered_order_count
+    description: Count of delivered orders (q02 ground truth).
+    sql: |
+      SELECT COUNT(DISTINCT o.order_id) AS delivered_orders
+      FROM orders o
+      WHERE o.order_status = 'delivered'
+
+
+# Full eval set (10 questions) contained in evals/gold_questions.json
