@@ -3,4 +3,4 @@ $ErrorActionPreference = "Stop"
 
 Set-Location $PSScriptRoot\..
 
-.\.venv\Scripts\python.exe -m evals.eval_runner --mode schema
+.\.venv\Scripts\python.exe -m evals.eval_runner

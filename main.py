@@ -2,7 +2,7 @@
 
 import argparse
 
-from agent.text_to_sql_agent import AnalyticsAgent
+from agent.semantic_agent import SemanticAgent
 
 
 def main() -> None:
@@ -11,7 +11,7 @@ def main() -> None:
     parser.add_argument("--question", required=True, help="Natural-language question")
     args = parser.parse_args()
 
-    agent = AnalyticsAgent()
+    agent = SemanticAgent()
     answer = agent.ask(args.question)
     print(answer.sql)
     print(answer.columns)

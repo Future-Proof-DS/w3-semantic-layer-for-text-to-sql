@@ -2,29 +2,11 @@
 
 from __future__ import annotations
 
-import os
-
 import streamlit as st
 
-from agent.base_agent import BaseAgent
 from agent.semantic_agent import SemanticAgent
-from agent.text_to_sql_agent import AgentAnswer, AnalyticsAgent
-from ui.theme import apply_page_style
-
-AGENT_MODES: dict[str, tuple[str, type[AnalyticsAgent]]] = {
-    "schema": ("Chat — schema only", BaseAgent),
-    "semantic": ("Chat — semantic layer", SemanticAgent),
-}
-
-
-def _resolve_agent_mode() -> tuple[str, type[AnalyticsAgent]]:
-    """Read workshop agent mode from the environment."""
-    mode = os.environ.get("WORKSHOP_AGENT_MODE", "schema").lower()
-    if mode not in AGENT_MODES:
-        raise ValueError(
-            f"WORKSHOP_AGENT_MODE must be 'schema' or 'semantic', got: {mode!r}"
-        )
-    return mode, AGENT_MODES[mode][1]
+from agent.text_to_sql_agent import AgentAnswer
+from ui.theme import apply_page_style, render_mode_badge
 
 
 def _format_result_table(answer: AgentAnswer) -> str:
@@ -42,19 +24,17 @@ def _format_result_table(answer: AgentAnswer) -> str:
 
 def main() -> None:
     """Run a plain chat interface over the warehouse agent."""
-    mode, agent_class = _resolve_agent_mode()
-    page_title, _ = AGENT_MODES[mode]
-
-    st.set_page_config(page_title=page_title, page_icon=None, layout="centered")
+    st.set_page_config(page_title="Chat — semantic layer", page_icon=None, layout="centered")
     apply_page_style()
+    render_mode_badge()
 
     if "agent" not in st.session_state:
-        st.session_state.agent = agent_class()
+        st.session_state.agent = SemanticAgent()
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    agent: AnalyticsAgent = st.session_state.agent
+    agent: SemanticAgent = st.session_state.agent
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):

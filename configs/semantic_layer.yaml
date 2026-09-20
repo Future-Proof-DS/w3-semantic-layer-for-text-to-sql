@@ -14,7 +14,7 @@ tables:
         type: varchar
         role: entity
         description: Unique order identifier; join key for items and payments.
-      - name: customer_id
+      - name: customer_idä
         type: varchar
         role: relationship
         description: Links the order to the buyer in customers.

@@ -49,7 +49,7 @@ def load_schema_text(
 
 
 def load_semantic_layer_text(config_path: Path = SEMANTIC_LAYER_PATH) -> str:
-    """Render the bootcamp-style semantic layer YAML as plain text for the prompt."""
+    """Render the semantic layer YAML as plain text for the prompt."""
     with config_path.open(encoding="utf-8") as config_file:
         semantic_layer = yaml.safe_load(config_file)
 

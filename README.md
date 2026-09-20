@@ -1,8 +1,6 @@
-# Workshop 3 — Semantic Layer for Text-to-SQL
+# Semantic Layer Text-to-SQL
 
-Local DuckDB demo comparing a schema-only Text-to-SQL agent against a semantic-aware agent on the [Olist Brazilian E-Commerce](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) dataset.
-
-A Streamlit chat is the agent face; the eval harness stays CLI.
+Local DuckDB demo: a Streamlit chat backed by a semantic-aware Text-to-SQL agent on the [Olist Brazilian E-Commerce](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) dataset.
 
 ## Dataset
 
@@ -30,42 +28,34 @@ python setup_db.py
 copy .env.example .env
 ```
 
-Edit `.env` locally and set `ANTHROPIC_API_KEY`. The file is gitignored — never paste the key in the terminal during a demo.
+Edit `.env` and set `ANTHROPIC_API_KEY`.
 
 ## Run the chat UI
 
-Two launcher scripts — schema-only (port **8501**) and semantic layer (port **8502**):
-
 ```powershell
-.\scripts\run_chat_schema.ps1
-.\scripts\run_chat_semantic.ps1
+.\scripts\run_chat.ps1
 ```
 
-Browser titles: **Chat — schema only** and **Chat — semantic layer**.
+Opens at http://localhost:8501. Business definitions come from `configs/semantic_layer.yaml`.
 
 ## Eval harness (CLI)
 
 ```powershell
-.\scripts\run_eval_schema.ps1
-.\scripts\run_eval_semantic.ps1
+.\scripts\run_eval.ps1
 ```
 
-Or directly:
+Or:
 
 ```powershell
-python -m evals.eval_runner --mode schema
-python -m evals.eval_runner --mode semantic
+python -m evals.eval_runner
 ```
-
-Scoreboard stays in the terminal — not in the chat UI.
 
 ## Layout
 
 ```
-app.py                        # Streamlit chat (mode via WORKSHOP_AGENT_MODE)
-scripts/                      # Demo launchers (chat + eval)
+app.py                        # Streamlit chat
+scripts/                      # Launchers (chat + eval)
 agent/
-  base_agent.py               # Schema-only agent
   semantic_agent.py           # Semantic-layer agent
   text_to_sql_agent.py        # Shared Text-to-SQL engine
 configs/semantic_layer.yaml   # Tables, measures, relationships, golden queries

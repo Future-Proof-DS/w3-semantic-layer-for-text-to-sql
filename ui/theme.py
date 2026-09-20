@@ -1,4 +1,4 @@
-"""Shared Streamlit theme for workshop chat UI."""
+"""Shared Streamlit theme for the chat UI."""
 
 ACCENT_COLOR = "#e2b84b"
 PAGE_BACKGROUND = "#ffffff"
@@ -197,6 +197,41 @@ PAGE_STYLE = f"""
         color: {MUTED_TEXT_COLOR};
         margin-bottom: 0.15rem;
     }}
+
+    .mode-badge {{
+        position: fixed;
+        top: 1rem;
+        left: 1rem;
+        z-index: 999;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        line-height: 1;
+        color: {TEXT_COLOR};
+        pointer-events: none;
+        user-select: none;
+    }}
+
+    .mode-badge__dot {{
+        width: 0.45rem;
+        height: 0.45rem;
+        border-radius: 50%;
+        background-color: {ACCENT_COLOR};
+        flex-shrink: 0;
+    }}
+
+    /* Keep the fixed badge out of the chat document flow */
+    .stElementContainer:has(.mode-badge),
+    [data-testid="stHtml"]:has(.mode-badge),
+    div:has(> .mode-badge) {{
+        height: 0 !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        overflow: visible !important;
+    }}
 </style>
 """
 
@@ -206,3 +241,15 @@ def apply_page_style() -> None:
     import streamlit as st
 
     st.html(PAGE_STYLE)
+
+
+def render_mode_badge() -> None:
+    """Show a quiet top-left chip for the semantic layer."""
+    import streamlit as st
+
+    st.html(
+        '<div class="mode-badge">'
+        '<span class="mode-badge__dot"></span>'
+        "Semantic layer"
+        "</div>"
+    )
