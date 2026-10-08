@@ -46,19 +46,39 @@ Edit `.env` and set `ANTHROPIC_API_KEY`.
 
 ## Run the chat UI
 
+Two chat apps — schema only (port **8501**) and semantic layer (port **8502**).
+
+### Schema only (no semantic layer)
+
 PowerShell:
 
 ```powershell
-.\scripts\run_chat.ps1
+.\scripts\run_chat_schema.ps1
 ```
 
 CMD:
 
 ```bat
-scripts\run_chat.cmd
+scripts\run_chat_schema.cmd
 ```
 
-Opens at http://localhost:8501. Business definitions come from `configs/semantic_layer.yaml`.
+http://localhost:8501
+
+### Semantic layer
+
+PowerShell:
+
+```powershell
+.\scripts\run_chat_semantic.ps1
+```
+
+CMD:
+
+```bat
+scripts\run_chat_semantic.cmd
+```
+
+http://localhost:8502 — business definitions from `configs/semantic_layer.yaml`.
 
 
 

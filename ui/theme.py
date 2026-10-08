@@ -208,7 +208,7 @@ PAGE_STYLE = f"""
         gap: 0.4rem;
         font-size: 0.8rem;
         line-height: 1;
-        color: {TEXT_COLOR};
+        color: {MUTED_TEXT_COLOR};
         pointer-events: none;
         user-select: none;
     }}
@@ -217,8 +217,16 @@ PAGE_STYLE = f"""
         width: 0.45rem;
         height: 0.45rem;
         border-radius: 50%;
-        background-color: {ACCENT_COLOR};
+        background-color: {BORDER_COLOR};
         flex-shrink: 0;
+    }}
+
+    .mode-badge--semantic {{
+        color: {TEXT_COLOR};
+    }}
+
+    .mode-badge--semantic .mode-badge__dot {{
+        background-color: {ACCENT_COLOR};
     }}
 
     /* Keep the fixed badge out of the chat document flow */
@@ -243,13 +251,24 @@ def apply_page_style() -> None:
     st.html(PAGE_STYLE)
 
 
-def render_mode_badge() -> None:
-    """Show a quiet top-left chip for the semantic layer."""
+MODE_BADGE_LABELS: dict[str, str] = {
+    "schema": "Schema only",
+    "semantic": "Semantic layer",
+}
+
+
+def render_mode_badge(mode: str) -> None:
+    """Show a quiet top-left chip for the active agent mode."""
     import streamlit as st
 
+    badge_label = MODE_BADGE_LABELS.get(mode, mode)
+    badge_modifier = (
+        "mode-badge--semantic" if mode == "semantic" else "mode-badge--schema"
+    )
+
     st.html(
-        '<div class="mode-badge">'
-        '<span class="mode-badge__dot"></span>'
-        "Semantic layer"
-        "</div>"
+        f'<div class="mode-badge {badge_modifier}">'
+        f'<span class="mode-badge__dot"></span>'
+        f"{badge_label}"
+        f"</div>"
     )
