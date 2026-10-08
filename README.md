@@ -20,6 +20,8 @@ CSVs live in `data/`; `python setup_db.py` loads them into `data/olist.duckdb` u
 
 ## Setup
 
+PowerShell:
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -28,26 +30,74 @@ python setup_db.py
 copy .env.example .env
 ```
 
+CMD:
+
+```bat
+python -m venv .venv
+.\.venv\Scripts\activate.bat
+pip install -r requirements.txt
+python setup_db.py
+copy .env.example .env
+```
+
 Edit `.env` and set `ANTHROPIC_API_KEY`.
 
+
+
 ## Run the chat UI
+
+PowerShell:
 
 ```powershell
 .\scripts\run_chat.ps1
 ```
 
+CMD:
+
+```bat
+scripts\run_chat.cmd
+```
+
 Opens at http://localhost:8501. Business definitions come from `configs/semantic_layer.yaml`.
+
+
+
 
 ## Eval harness (CLI)
 
+### Schema only (no semantic layer)
+
+PowerShell:
+
 ```powershell
-.\scripts\run_eval.ps1
+.\scripts\run_eval_schema.ps1
 ```
 
-Or:
+CMD:
+
+```bat
+scripts\run_eval_schema.cmd
+```
+
+### Semantic layer
+
+PowerShell:
 
 ```powershell
-python -m evals.eval_runner
+.\scripts\run_eval_semantic.ps1
+```
+
+CMD:
+
+```bat
+scripts\run_eval_semantic.cmd
+```
+
+### Or call Python directly
+
+```bat
+.\.venv\Scripts\python.exe -m evals.eval_runner --mode schema
+.\.venv\Scripts\python.exe -m evals.eval_runner --mode semantic
 ```
 
 ## Layout

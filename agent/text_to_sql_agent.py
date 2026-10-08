@@ -43,7 +43,9 @@ class AnalyticsAgent:
         self,
         database_path: Path = DATABASE_PATH,
         semantic_layer_path: Path = SEMANTIC_LAYER_PATH,
-        model_name: str = "claude-sonnet-4-5",
+        model_name: str = "claude-haiku-5-5", 
+        # TODO claude-sonnet-5-5 is probably the most powerful model for this task
+        # TODO Select your model here: claude-haiku-5-5 if you want a cheaper/faster run and evals are still good. opus or fable are overkill of the task
         use_semantic_layer: bool = False,
     ) -> None:
         self.database_path = database_path
@@ -65,7 +67,7 @@ class AnalyticsAgent:
 
         is_semantic_layer_connected = self.use_semantic_layer
 
-        if self.use_semantic_layer:
+        if self.use_semantic_layer: # HERE THE SEMANTIC LAYER IS ADDED TO THE PROMPT
             prompt_parts.append(
                 "SEMANTIC LAYER (business definitions & join rules):\n"
                 + self.semantic_layer_text
@@ -84,11 +86,11 @@ class AnalyticsAgent:
         response = self.client.messages.create(
             model=self.model_name,
             max_tokens=1024,
-            temperature=0,
+            # temperature=0, # TODO: uncomment this if you want a more deterministic response: not supported by all models
             system=system_prompt,
             messages=[{"role": "user", "content": question}],
         )
-        raw_text = response.content[0].text
+        raw_text = _extract_response_text(response.content)
         return _extract_sql(raw_text), is_semantic_layer_connected
 
     def ask(self, question: str) -> AgentAnswer:
@@ -112,6 +114,17 @@ class AnalyticsAgent:
         rows = cursor.fetchall()
         connection.close()
         return columns, rows
+
+
+def _extract_response_text(content_blocks: list) -> str:
+    """Take text from the first text block, skipping thinking blocks."""
+    for content_block in content_blocks:
+        if getattr(content_block, "type", None) == "text":
+            return content_block.text
+        if hasattr(content_block, "text") and not hasattr(content_block, "thinking"):
+            return content_block.text
+
+    raise RuntimeError("Model response contained no text block.")
 
 
 def _extract_sql(raw_text: str) -> str:

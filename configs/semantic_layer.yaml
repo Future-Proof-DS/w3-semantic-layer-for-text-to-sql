@@ -2,7 +2,7 @@ version: "1.0"
 target_database: "olist.duckdb"
 
 # Business context for the Text-to-SQL agent
-# Physical column types still come from DuckDB via agent/context.py 
+# Physical column types still come from DuckDB via agent/context.py
 # this file adds descriptions, roles, relationships, measures, and golden queries.
 
 tables:
@@ -14,7 +14,7 @@ tables:
         type: varchar
         role: entity
         description: Unique order identifier; join key for items and payments.
-      - name: customer_idä
+      - name: customer_id
         type: varchar
         role: relationship
         description: Links the order to the buyer in customers.
@@ -30,7 +30,7 @@ tables:
         description: When the order was placed; cast to TIMESTAMP for date filters.
 
   order_items:
-    description: Line items on each order. Net product revenue comes from price only.
+    description: Line items on each order. Net product revenue / GMV comes from price only.
     primary_key: order_item_id
     fields:
       - name: order_item_id
@@ -49,14 +49,20 @@ tables:
         description: Product sold on this line.
         related_table: products
         related_field: product_id
+      - name: seller_id
+        type: varchar
+        role: relationship
+        description: Seller fulfilling this line item. Use COUNT(DISTINCT seller_id) for multi-seller orders.
+        related_table: sellers
+        related_field: seller_id
       - name: price
         type: double
         role: measure
-        description: Product price only. Use for net product revenue — not freight, not payments.
+        description: Product price only. Use for GMV / net product revenue — not freight, not payments.
       - name: freight_value
         type: double
         role: measure
-        description: Shipping charge on the line item. Do not add to net product revenue.
+        description: Shipping charge on the line item. Do not add to GMV / net product revenue.
 
   order_payments:
     description: Payment rows per order. payment_value includes freight collected at checkout.
@@ -79,7 +85,7 @@ tables:
       - name: payment_value
         type: double
         role: measure
-        description: Amount paid including freight. Use for gross payment value, not net product revenue.
+        description: Amount paid including freight. Use for gross payment value, not GMV.
 
   customers:
     description: Customer master data. Join to orders for buyer location and segmentation.
@@ -93,6 +99,19 @@ tables:
         type: varchar
         role: dimension
         description: Brazilian state of the buyer (not the seller). Join orders → customers.
+
+  sellers:
+    description: Seller master data. Use only when the question is explicitly about sellers.
+    primary_key: seller_id
+    fields:
+      - name: seller_id
+        type: varchar
+        role: entity
+        description: Unique seller identifier; links from order_items.seller_id.
+      - name: seller_state
+        type: varchar
+        role: dimension
+        description: Brazilian state of the seller. Do not use for buyer/market geography.
 
   products:
     description: Product catalog attributes for category and assortment questions.
@@ -108,7 +127,7 @@ tables:
         description: Category slug; join product_category_name_translation for English labels.
 
   product_category_name_translation:
-    description: Maps Portuguese category slugs to English display names.
+    description: Maps Portuguese category slugs to English display names. Always prefer English labels in answers.
     primary_key: product_category_name
     fields:
       - name: product_category_name
@@ -129,6 +148,8 @@ relationships:
     join: order_payments.order_id = orders.order_id
   - description: Orders belong to a customer (buyer location).
     join: orders.customer_id = customers.customer_id
+  - description: Line items are fulfilled by a seller.
+    join: order_items.seller_id = sellers.seller_id
   - description: Line items reference a product.
     join: order_items.product_id = products.product_id
   - description: English category labels for products.
@@ -136,9 +157,27 @@ relationships:
 
 measures:
   net_product_revenue:
-    name: Net Product Revenue
-    description: Pure product sales excluding shipping/freight and non-delivered orders.
+    name: Net Product Revenue / GMV
+    description: >
+      Aliases: GMV, revenue, sales, product revenue, merchandise value.
+      Whenever the user says GMV or revenue without asking for checkout/payments,
+      use SUM(order_items.price) on delivered orders. Never add freight_value.
+      Never use order_payments.payment_value for GMV.
     formula: SUM(order_items.price)
+    source_table: order_items
+    required_joins:
+      - orders
+    mandatory_filters:
+      - orders.order_status = 'delivered'
+
+  average_order_value:
+    name: Average Order Value
+    description: >
+      Average order value (AOV) is the mean of per-order product revenue:
+      AVG( SUM(order_items.price) GROUP BY order_id ) on delivered orders.
+      Do NOT use AVG(order_items.price) (that is line-item price).
+      Do NOT average payment_value unless the user asks for average amount paid.
+    formula: AVG(order_level_sum_of_price)
     source_table: order_items
     required_joins:
       - orders
@@ -147,7 +186,12 @@ measures:
 
   gross_payment_value:
     name: Gross Payment Value
-    description: Total payment received including freight fees on delivered orders.
+    description: >
+      Total amount customers paid at checkout, including freight.
+      Use for checkout / amount paid / payment-type breakdowns.
+      When slicing "product revenue" or "sales" by payment_type, still use
+      SUM(payment_value) by payment_type — never join payments to items to
+      allocate prices (that double-counts).
     formula: SUM(order_payments.payment_value)
     source_table: order_payments
     required_joins:
@@ -155,50 +199,122 @@ measures:
     mandatory_filters:
       - orders.order_status = 'delivered'
 
+  total_freight:
+    name: Total Freight
+    description: Sum of shipping charges on line items for delivered orders.
+    formula: SUM(order_items.freight_value)
+    source_table: order_items
+    required_joins:
+      - orders
+    mandatory_filters:
+      - orders.order_status = 'delivered'
+
+business_calendar:
+  latest_full_month: "2018-08-01"
+  note: >
+    For this warehouse demo, "latest full month" / "last month" means August 2018
+    (TIMESTAMP '2018-08-01'). Filter order_purchase_timestamp with DATE_TRUNC('month', ...).
+
 join_rules:
   - rule_id: prevent_cartesian_fanout
     description: "CRITICAL: Never join order_payments directly to order_items in a single query. Aggregating prices and payments in one join causes a Cartesian explosion."
     recommendation: Use separate CTEs or subqueries for item revenue and payment totals, then combine.
 
   - rule_id: customer_state_origin
-    description: Use customers.customer_state for buyer geography, not sellers.seller_state.
+    description: >
+      Geography questions (state, São Paulo, SP, market, buyers) use
+      customers.customer_state via orders → customers. Never use sellers.seller_state
+      unless the user explicitly asks about sellers.
 
   - rule_id: revenue_vs_payments
-    description: net_product_revenue uses order_items.price; gross_payment_value uses order_payments.payment_value. They are different metrics.
+    description: >
+      GMV / net_product_revenue uses order_items.price; gross_payment_value uses
+      order_payments.payment_value. They are different metrics.
+
+  - rule_id: payment_type_breakdown
+    description: >
+      Breakdowns by payment_type must aggregate order_payments.payment_value only.
+      Do not join to order_items to sum price by payment_type.
+
+  - rule_id: category_english_labels
+    description: >
+      For product category rankings, join product_category_name_translation and
+      report product_category_name_english when available.
+
+  - rule_id: multi_seller_orders
+    description: >
+      "More than one seller" means COUNT(DISTINCT order_items.seller_id) > 1 per order.
+      That is not the same as more than one line item.
+
+  - rule_id: single_metric_output
+    description: >
+      When the user asks for a single number (e.g. a change, a total, an average),
+      SELECT only that one metric column — no extra breakdown columns.
+
+  - rule_id: shipping_share
+    description: >
+      "How much of what customers paid is shipping" means SUM(order_items.freight_value)
+      on delivered orders — not payment_value minus price.
 
 golden_queries:
-  - name: net_product_revenue_delivered
-    description: Total net product revenue on delivered orders (q01 ground truth).
+  - name: average_order_value_delivered
+    description: AOV on delivered orders (q01 ground truth).
     sql: |
-      SELECT ROUND(SUM(oi.price), 2) AS net_product_revenue
+      SELECT ROUND(AVG(order_revenue), 2) AS average_order_value
+      FROM (
+        SELECT oi.order_id, SUM(oi.price) AS order_revenue
+        FROM order_items oi
+        JOIN orders o ON o.order_id = oi.order_id
+        WHERE o.order_status = 'delivered'
+        GROUP BY oi.order_id
+      )
+
+  - name: gmv_delivered
+    description: Total GMV on delivered orders (q02 ground truth).
+    sql: |
+      SELECT ROUND(SUM(oi.price), 2) AS gmv
       FROM order_items oi
       JOIN orders o ON o.order_id = oi.order_id
       WHERE o.order_status = 'delivered'
 
-  - name: net_and_gross_revenue_delivered
-    description: Both metrics on delivered orders without fan-out (q05 ground truth).
+  - name: latest_month_gmv
+    description: GMV for latest full month August 2018 (q07 ground truth).
     sql: |
-      WITH item_rev AS (
-        SELECT ROUND(SUM(oi.price), 2) AS net_product_revenue
+      SELECT ROUND(SUM(oi.price), 2) AS gmv
+      FROM order_items oi
+      JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.order_status = 'delivered'
+        AND DATE_TRUNC('month', CAST(o.order_purchase_timestamp AS TIMESTAMP))
+            = TIMESTAMP '2018-08-01'
+
+  - name: health_beauty_revenue_and_checkout
+    description: English health_beauty revenue + checkout for those orders (q04 ground truth).
+    sql: |
+      WITH hb_orders AS (
+        SELECT DISTINCT oi.order_id
         FROM order_items oi
         JOIN orders o ON o.order_id = oi.order_id
+        JOIN products p ON p.product_id = oi.product_id
+        LEFT JOIN product_category_name_translation t
+          ON t.product_category_name = p.product_category_name
         WHERE o.order_status = 'delivered'
+          AND COALESCE(t.product_category_name_english, p.product_category_name) = 'health_beauty'
+      ),
+      item_rev AS (
+        SELECT ROUND(SUM(oi.price), 2) AS net_product_revenue
+        FROM order_items oi
+        JOIN hb_orders h ON h.order_id = oi.order_id
+        JOIN products p ON p.product_id = oi.product_id
+        LEFT JOIN product_category_name_translation t
+          ON t.product_category_name = p.product_category_name
+        WHERE COALESCE(t.product_category_name_english, p.product_category_name) = 'health_beauty'
       ),
       pay AS (
         SELECT ROUND(SUM(p.payment_value), 2) AS gross_payment_value
         FROM order_payments p
-        JOIN orders o ON o.order_id = p.order_id
-        WHERE o.order_status = 'delivered'
+        JOIN hb_orders h ON h.order_id = p.order_id
       )
       SELECT item_rev.net_product_revenue, pay.gross_payment_value
       FROM item_rev CROSS JOIN pay
-
-  - name: delivered_order_count
-    description: Count of delivered orders (q02 ground truth).
-    sql: |
-      SELECT COUNT(DISTINCT o.order_id) AS delivered_orders
-      FROM orders o
-      WHERE o.order_status = 'delivered'
-
 
 # Full eval set (10 questions) contained in evals/gold_questions.json

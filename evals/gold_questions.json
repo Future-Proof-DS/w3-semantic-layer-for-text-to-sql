@@ -1,101 +1,99 @@
 [
   {
     "id": "q01",
-    "question": "What is total net product revenue for delivered orders?",
-    "gold_sql": "SELECT ROUND(SUM(oi.price), 2) AS net_product_revenue\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nWHERE o.order_status = 'delivered'",
-    "expected_rows": [[13221498.11]],
+    "question": "What is the average order value for delivered orders?",
+    "gold_sql": "SELECT ROUND(AVG(order_revenue), 2) AS average_order_value\nFROM (\n  SELECT oi.order_id, SUM(oi.price) AS order_revenue\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  WHERE o.order_status = 'delivered'\n  GROUP BY oi.order_id\n)",
+    "expected_rows": [[137.04]],
     "naive_traps": [
-      "SUM(payment_value) from order_payments",
-      "SUM(price + freight_value)",
-      "SUM(price) with no delivered filter",
-      "join order_payments to order_items (fan-out)"
+      "AVG(order_items.price) line-level → 119.98",
+      "AVG of payment totals per order → 159.86"
     ]
   },
   {
     "id": "q02",
-    "question": "How many delivered orders are in the warehouse?",
-    "gold_sql": "SELECT COUNT(DISTINCT o.order_id) AS delivered_orders\nFROM orders o\nWHERE o.order_status = 'delivered'",
-    "expected_rows": [[96478]],
+    "question": "What is total GMV for delivered orders?",
+    "gold_sql": "SELECT ROUND(SUM(oi.price), 2) AS gmv\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nWHERE o.order_status = 'delivered'",
+    "expected_rows": [[13221498.11]],
     "naive_traps": [
-      "COUNT(*) on all orders (99441)",
-      "COUNT(*) on order_items"
+      "SUM(payment_value) → 15422461.77",
+      "SUM(price + freight_value) → 15419773.75"
     ]
   },
   {
     "id": "q03",
-    "question": "Which customer state has the highest net product revenue on delivered orders, and what is that revenue?",
-    "gold_sql": "SELECT cu.customer_state, ROUND(SUM(oi.price), 2) AS net_product_revenue\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nJOIN customers cu ON cu.customer_id = o.customer_id\nWHERE o.order_status = 'delivered'\nGROUP BY cu.customer_state\nORDER BY net_product_revenue DESC\nLIMIT 1",
-    "expected_rows": [["SP", 5067633.16]],
+    "question": "Which payment type accounts for the most product revenue on delivered orders? Return the payment type and the amount.",
+    "gold_sql": "SELECT p.payment_type, ROUND(SUM(p.payment_value), 2) AS gross_payment_value\nFROM order_payments p\nJOIN orders o ON o.order_id = p.order_id\nWHERE o.order_status = 'delivered'\nGROUP BY p.payment_type\nORDER BY gross_payment_value DESC\nLIMIT 1",
+    "expected_rows": [["credit_card", 12101094.88]],
     "naive_traps": [
-      "group by sellers.seller_state instead of customers.customer_state"
+      "join order_items to order_payments and SUM(price) → credit_card / 10673305.65"
     ]
   },
   {
     "id": "q04",
-    "question": "What is total gross payment value for delivered orders?",
-    "gold_sql": "SELECT ROUND(SUM(p.payment_value), 2) AS gross_payment_value\nFROM order_payments p\nJOIN orders o ON o.order_id = p.order_id\nWHERE o.order_status = 'delivered'",
-    "expected_rows": [[15422461.77]],
+    "question": "For the English category health_beauty on delivered orders, what is product revenue and how much did those orders take at checkout?",
+    "gold_sql": "WITH hb_orders AS (\n  SELECT DISTINCT oi.order_id\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  JOIN products p ON p.product_id = oi.product_id\n  LEFT JOIN product_category_name_translation t\n    ON t.product_category_name = p.product_category_name\n  WHERE o.order_status = 'delivered'\n    AND COALESCE(t.product_category_name_english, p.product_category_name) = 'health_beauty'\n),\nitem_rev AS (\n  SELECT ROUND(SUM(oi.price), 2) AS net_product_revenue\n  FROM order_items oi\n  JOIN hb_orders h ON h.order_id = oi.order_id\n  JOIN products p ON p.product_id = oi.product_id\n  LEFT JOIN product_category_name_translation t\n    ON t.product_category_name = p.product_category_name\n  WHERE COALESCE(t.product_category_name_english, p.product_category_name) = 'health_beauty'\n),\npay AS (\n  SELECT ROUND(SUM(p.payment_value), 2) AS gross_payment_value\n  FROM order_payments p\n  JOIN hb_orders h ON h.order_id = p.order_id\n)\nSELECT item_rev.net_product_revenue, pay.gross_payment_value\nFROM item_rev CROSS JOIN pay",
+    "expected_rows": [[1233131.72, 1419509.89]],
     "naive_traps": [
-      "SUM(price) or SUM(price + freight_value) from order_items",
-      "SUM(payment_value) with no delivered filter"
+      "join items to payments for the category → payment side ~1620684.04",
+      "Portuguese category only / miss translation"
     ]
   },
   {
     "id": "q05",
-    "question": "For delivered orders, what is net product revenue and gross payment value?",
-    "gold_sql": "WITH item_rev AS (\n  SELECT ROUND(SUM(oi.price), 2) AS net_product_revenue\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  WHERE o.order_status = 'delivered'\n),\npay AS (\n  SELECT ROUND(SUM(p.payment_value), 2) AS gross_payment_value\n  FROM order_payments p\n  JOIN orders o ON o.order_id = p.order_id\n  WHERE o.order_status = 'delivered'\n)\nSELECT item_rev.net_product_revenue, pay.gross_payment_value\nFROM item_rev CROSS JOIN pay",
-    "expected_rows": [[13221498.11, 15422461.77]],
+    "question": "Which product category has the highest revenue on delivered orders?",
+    "gold_sql": "SELECT COALESCE(t.product_category_name_english, p.product_category_name) AS category,\n       ROUND(SUM(oi.price), 2) AS net_product_revenue\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nJOIN products p ON p.product_id = oi.product_id\nLEFT JOIN product_category_name_translation t\n  ON t.product_category_name = p.product_category_name\nWHERE o.order_status = 'delivered'\nGROUP BY 1\nORDER BY net_product_revenue DESC\nLIMIT 1",
+    "expected_rows": [["health_beauty", 1233131.72]],
     "naive_traps": [
-      "single query joining order_items to order_payments (Cartesian fan-out → ~13813828.71 / ~19776160.44)"
+      "Portuguese slug beleza_saude (translation table not in schema-only context)"
     ]
   },
   {
     "id": "q06",
-    "question": "What is the average item price on delivered orders? Do not include freight.",
-    "gold_sql": "SELECT ROUND(AVG(oi.price), 2) AS avg_item_price\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nWHERE o.order_status = 'delivered'",
-    "expected_rows": [[119.98]],
+    "question": "How many delivered orders have items from more than one seller?",
+    "gold_sql": "SELECT COUNT(*) AS multi_seller_delivered_orders\nFROM (\n  SELECT oi.order_id\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  WHERE o.order_status = 'delivered'\n  GROUP BY oi.order_id\n  HAVING COUNT(DISTINCT oi.seller_id) > 1\n)",
+    "expected_rows": [[1275]],
     "naive_traps": [
-      "AVG(price + freight_value) → 139.93",
-      "AVG(payment_value)"
+      "COUNT multi-item orders instead → 9635",
+      "COUNT multi-payment orders → 2875"
     ]
   },
   {
     "id": "q07",
-    "question": "Which product category has the highest net product revenue on delivered orders, and what is that revenue? Use English category names when available.",
-    "gold_sql": "SELECT COALESCE(t.product_category_name_english, p.product_category_name) AS category,\n       ROUND(SUM(oi.price), 2) AS net_product_revenue\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nJOIN products p ON p.product_id = oi.product_id\nLEFT JOIN product_category_name_translation t\n  ON t.product_category_name = p.product_category_name\nWHERE o.order_status = 'delivered'\nGROUP BY 1\nORDER BY net_product_revenue DESC\nLIMIT 1",
-    "expected_rows": [["health_beauty", 1233131.72]],
+    "question": "What was GMV in the latest full month available in the dataset?",
+    "gold_sql": "SELECT ROUND(SUM(oi.price), 2) AS gmv\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nWHERE o.order_status = 'delivered'\n  AND DATE_TRUNC('month', CAST(o.order_purchase_timestamp AS TIMESTAMP)) = TIMESTAMP '2018-08-01'",
+    "expected_rows": [[838576.64]],
     "naive_traps": [
-      "rank by payment_value or price + freight",
-      "omit delivered filter"
+      "use payment_value for Aug 2018 → 985414.28",
+      "pick a different month without semantic calendar hint"
     ]
   },
   {
     "id": "q08",
-    "question": "What is net product revenue for delivered orders placed in 2018?",
-    "gold_sql": "SELECT ROUND(SUM(oi.price), 2) AS net_product_revenue\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nWHERE o.order_status = 'delivered'\n  AND EXTRACT(year FROM CAST(o.order_purchase_timestamp AS TIMESTAMP)) = 2018",
-    "expected_rows": [[7218125.12]],
+    "question": "What is delivered GMV for the São Paulo market?",
+    "gold_sql": "SELECT ROUND(SUM(oi.price), 2) AS gmv\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nJOIN customers cu ON cu.customer_id = o.customer_id\nWHERE o.order_status = 'delivered'\n  AND cu.customer_state = 'SP'",
+    "expected_rows": [[5067633.16]],
     "naive_traps": [
-      "use payment_value for the year",
-      "include non-delivered statuses"
+      "filter sellers.seller_state = 'SP' → 8509511.46"
     ]
   },
   {
     "id": "q09",
-    "question": "Which payment type has the highest gross payment value on delivered orders, and what is that value?",
-    "gold_sql": "SELECT p.payment_type, ROUND(SUM(p.payment_value), 2) AS gross_payment_value\nFROM order_payments p\nJOIN orders o ON o.order_id = p.order_id\nWHERE o.order_status = 'delivered'\nGROUP BY p.payment_type\nORDER BY gross_payment_value DESC\nLIMIT 1",
-    "expected_rows": [["credit_card", 12101094.88]],
+    "question": "On delivered orders, how much of what customers paid is shipping?",
+    "gold_sql": "SELECT ROUND(SUM(oi.freight_value), 2) AS total_freight\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nWHERE o.order_status = 'delivered'",
+    "expected_rows": [[2198275.64]],
     "naive_traps": [
-      "aggregate order_items.price by a non-existent payment type on items"
+      "SUM(payment_value) - SUM(price) via separate CTEs → 2200963.66",
+      "fan-out join difference → wrong"
     ]
   },
   {
     "id": "q10",
-    "question": "How many delivered orders contain more than one item?",
-    "gold_sql": "SELECT COUNT(*) AS multi_item_delivered_orders\nFROM (\n  SELECT oi.order_id\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  WHERE o.order_status = 'delivered'\n  GROUP BY oi.order_id\n  HAVING COUNT(*) > 1\n)",
-    "expected_rows": [[9635]],
+    "question": "Return only one number: the change in delivered GMV from July 2018 to August 2018 (August minus July).",
+    "gold_sql": "WITH month_gmv AS (\n  SELECT DATE_TRUNC('month', CAST(o.order_purchase_timestamp AS TIMESTAMP)) AS month,\n         SUM(oi.price) AS gmv\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  WHERE o.order_status = 'delivered'\n    AND DATE_TRUNC('month', CAST(o.order_purchase_timestamp AS TIMESTAMP))\n        IN (TIMESTAMP '2018-07-01', TIMESTAMP '2018-08-01')\n  GROUP BY 1\n)\nSELECT ROUND(\n  (SELECT gmv FROM month_gmv WHERE month = TIMESTAMP '2018-08-01')\n  - (SELECT gmv FROM month_gmv WHERE month = TIMESTAMP '2018-07-01')\n, 2) AS gmv_change",
+    "expected_rows": [[-29376.82]],
     "naive_traps": [
-      "count multi-payment orders instead (2961)",
-      "omit delivered filter"
+      "return july/august/pct columns instead of a single change value",
+      "use payment_value month delta"
     ]
   }
 ]
